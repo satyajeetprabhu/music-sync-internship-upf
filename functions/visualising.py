@@ -2,7 +2,6 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 from matplotlib.ticker import FuncFormatter, MultipleLocator
-import numpy as np
 
 def seconds_to_hms(x, pos):
     """Convert seconds to HH:MM:SS format."""
@@ -10,8 +9,9 @@ def seconds_to_hms(x, pos):
     minutes = int((x % 3600) // 60)
     seconds = int(x % 60)
     return f'{hours:02d}:{minutes:02d}:{seconds:02d}'
+    
 
-def plot_by_beat(df=None, instr=None, beat=None, virtual=None, pcols=2, griddeviations=False, boxplot=False, colour='lightblue', colourpalette='Set2', pointsize=1):
+def plot_by_beat(df=None, instr=None, beat=None, virtual=None, pcols=2, griddeviations=False, colourpalette='Set2', pointsize=1):
     DF = pd.DataFrame()
     S = pd.DataFrame()
     
@@ -34,6 +34,13 @@ def plot_by_beat(df=None, instr=None, beat=None, virtual=None, pcols=2, griddevi
     DF['name'] = DF['name'].astype('category')
     S['name'] = S['name'].astype('category')
 
+    unique_beats = sorted(DF['beat'].unique())
+    # Create a mapping from beat values to numbers
+    beat_mapping = {beat: i + 1 for i, beat in enumerate(unique_beats)}
+    # Assign the corresponding number to each beat value
+    DF['beat_number'] = DF['beat'].map(beat_mapping)
+    S['beat_number'] = S['beatF'].map(beat_mapping)
+
     # Y-axis limits
     y_max = df[instr].dropna().values.max()  # Drop np.inf and -np.inf values
     y_min = 0
@@ -46,7 +53,7 @@ def plot_by_beat(df=None, instr=None, beat=None, virtual=None, pcols=2, griddevi
 
     for ax, instrument in zip(axes, instr):
         data = DF[DF['name'] == instrument]
-        sns.scatterplot(x=data['beat'] + data['VSDR'], y=data['instr'], hue=data['name'], ax=ax, palette=colourpalette, s=pointsize*12, alpha=0.9, legend=False)
+        sns.scatterplot(x=data['beat_number'] + data['VSDR'], y=data['instr'], hue=data['name'], ax=ax, palette=colourpalette, s=pointsize*12, alpha=0.9, legend=False)
         
         if griddeviations:
             s_data = S[S['name'] == instrument]
@@ -60,7 +67,7 @@ def plot_by_beat(df=None, instr=None, beat=None, virtual=None, pcols=2, griddevi
                     #formatted_label = f"{row['M']:.0f}%"
                     formatted_label = f"{round(row['M'])}%"
                 
-                ax.text(x=row['beatF'], y=row['Time'], s=formatted_label, ha='center', va='center', fontsize=8, 
+                ax.text(x=row['beat_number'], y=row['Time'], s=formatted_label, ha='center', va='center', fontsize=8, 
                         bbox=dict(facecolor='white', edgecolor='black', boxstyle='round,pad=0.3'))
 
         ax.set_title(f'{instrument}')
@@ -69,7 +76,13 @@ def plot_by_beat(df=None, instr=None, beat=None, virtual=None, pcols=2, griddevi
         
         ax.xaxis.set_major_locator(MultipleLocator(1))  # Set major ticks for x-axis
         ax.xaxis.set_minor_locator(MultipleLocator(0.5))  # Set minor ticks for x-axis
-        ax.set_xlim(0, df[beat].max()+0.5)  # Limit x-ticks to max(beat) + 0.5
+        ax.set_xlim(DF['beat_number'].min()-0.5, DF['beat_number'].max()+0.5)  # Limit x-ticks to min(beat)-0.5, max(beat)+0.5
+
+        # Set the x-ticks to match the adjusted beat numbers (starting at 1)
+        tick_positions = range(1, len(unique_beats) + 1)
+        ax.set_xticks(tick_positions)
+        # Set the x-tick labels to be the unique_beats array
+        ax.set_xticklabels(unique_beats)
         
         ax.yaxis.set_major_locator(MultipleLocator(60))  # Set major ticks for y-axis every minute
         ax.yaxis.set_minor_locator(MultipleLocator(30))  # Set minor ticks for y-axis every 30 seconds
