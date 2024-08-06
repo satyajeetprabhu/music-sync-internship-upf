@@ -49,7 +49,12 @@ def plot_by_beat(df=None, instr=None, beat=None, virtual=None, pcols=2, griddevi
     num_plots = len(instr)
     num_rows = num_plots // pcols + (num_plots % pcols > 0)
     fig, axes = plt.subplots(nrows=num_rows, ncols=pcols, figsize=(12, 4*num_rows), squeeze=True, sharex=True, sharey=True)
-    axes = axes.flatten()
+    
+    # Check if axes is a single AxesSubplot or an array of them
+    if num_plots == 1:
+        axes = [axes]  # Convert single AxesSubplot to a list
+    else:
+        axes = axes.flatten()  # Flatten the array of AxesSubplot
 
     for ax, instrument in zip(axes, instr):
         data = DF[DF['name'] == instrument]
@@ -67,7 +72,7 @@ def plot_by_beat(df=None, instr=None, beat=None, virtual=None, pcols=2, griddevi
                     #formatted_label = f"{row['M']:.0f}%"
                     formatted_label = f"{round(row['M'])}%"
                 
-                ax.text(x=row['beat_number'], y=row['Time'], s=formatted_label, ha='center', va='center', fontsize=8, 
+                ax.text(x=row['beat_number'], y=0, s=formatted_label, ha='center', va='center', fontsize=8, 
                         bbox=dict(facecolor='white', edgecolor='black', boxstyle='round,pad=0.3'))
 
         ax.set_title(f'{instrument}')
@@ -82,7 +87,7 @@ def plot_by_beat(df=None, instr=None, beat=None, virtual=None, pcols=2, griddevi
         tick_positions = range(1, len(unique_beats) + 1)
         ax.set_xticks(tick_positions)
         # Set the x-tick labels to be the unique_beats array
-        ax.set_xticklabels(unique_beats)
+        ax.set_xticklabels(unique_beats, y=-0.02)
         
         ax.yaxis.set_major_locator(MultipleLocator(60))  # Set major ticks for y-axis every minute
         ax.yaxis.set_minor_locator(MultipleLocator(30))  # Set minor ticks for y-axis every 30 seconds
@@ -95,7 +100,7 @@ def plot_by_beat(df=None, instr=None, beat=None, virtual=None, pcols=2, griddevi
         fig.delaxes(axes[i])
 
     # Common labels
-    fig.text(0.5, 0.04, f'Beat ({beat})', ha='center' , va='center', fontsize=14)
+    fig.text(0.55, 0.04, f'Beat ({beat})', ha='center' , va='center', fontsize=14)
     fig.text(0.04, 0.5, 'Time (HH:MM:SS)', ha='center', va='center', rotation='vertical', fontsize=14)
 
     plt.tight_layout(rect=[0.05, 0.05, 1, 0.95])

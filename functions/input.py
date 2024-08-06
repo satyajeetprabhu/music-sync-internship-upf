@@ -1,6 +1,6 @@
 import pandas as pd
 
-def get_df_csv(file_path, delimiter=',', sel_col=None, concat_axis=0, ignore_index=False):
+def get_df_csv(file_path, delimiter=',', sel_col=None, concat_axis=0, ignore_index=False, header='infer'):
     """
     Load dataframe from text (csv or txt) files.
 
@@ -37,7 +37,7 @@ def get_df_csv(file_path, delimiter=',', sel_col=None, concat_axis=0, ignore_ind
         
         try:
             # Load the file into a DataFrame
-            df = pd.read_csv(file, delimiter=delimiter)
+            df = pd.read_csv(file, delimiter=delimiter, header=header)
             
             # Select specified columns if sel_col is provided
             if sel_col is not None:

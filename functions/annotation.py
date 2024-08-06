@@ -60,10 +60,11 @@ def add_cycle(df, sd_column='SD', cycle_column='Cycle'):
     Returns:
     - DataFrame with the 'Cycle' column added.
     """
-
+    
+    '''
     if cycle_column in df.columns:
         raise ValueError('Cycle column already exists in dataframe. Select a different column name.')
-    
+    '''
     # Copy the SD column as a new df tmp
     tmp = df.copy()
     
@@ -76,7 +77,7 @@ def add_cycle(df, sd_column='SD', cycle_column='Cycle'):
         #pattern = r"(:[0-9]+|\|[0-9]+|\.[0-9]+|:[0-9]+:[0-9]+)$"   # Similar to the above pattern but with explicit digits
 
         # Add the cycle number to the dataframe
-        tmp['Cycle'] = ref.str.replace(pattern, '', regex=True).astype(int) # Remove the suffixes and convert to integer
+        tmp[cycle_column] = ref.str.replace(pattern, '', regex=True).astype(int) # Remove the suffixes and convert to integer
         
         return tmp
     
@@ -94,7 +95,7 @@ def add_cycle(df, sd_column='SD', cycle_column='Cycle'):
         # Initialize variables
         current_cycle = 1
         cycle_numbers = []
-        pattern = list(range(1, len(unique_beats) + 1))
+        pattern = list(range(1, len(unique_beats) + 1)) # for example [1,2,3,4....16]
         pattern_index = 0
 
         # Iterate through the mapped beats and assign cycle numbers
@@ -107,6 +108,10 @@ def add_cycle(df, sd_column='SD', cycle_column='Cycle'):
                     current_cycle += 1
             else:
                 # Handle the case where beat does not match the expected pattern
+                # Assign NA and continue to the next beat
+                cycle_numbers.append(np.nan)
+                continue
+                '''
                 # Reset pattern_index and re-check the current beat
                 while beat != pattern[pattern_index]:
                     pattern_index += 1
@@ -118,7 +123,8 @@ def add_cycle(df, sd_column='SD', cycle_column='Cycle'):
                 if pattern_index == len(pattern):
                     pattern_index = 0
                     current_cycle += 1
-
+                '''
+        
         # Assign the cycle numbers to the tmp DataFrame
         tmp[cycle_column] = cycle_numbers
 
@@ -221,9 +227,9 @@ def add_isobeats(df, instr, beat, beatlabel='Iso.Time'):
     df = df.copy()
 
     if len(instr) > 1:
-        df['Mean.Time'] = df[instr].mean(axis=1, skipna=True)
+        df['Virtual.Time'] = df[instr].mean(axis=1, skipna=True)
         if beatlabel != 'Iso.Time':
-            df.rename(columns={'Mean.Time': beatlabel}, inplace=True)
+            df.rename(columns={'Virtual.Time': beatlabel}, inplace=True)
         return df
 
     if len(instr) == 1:
@@ -235,25 +241,35 @@ def add_isobeats(df, instr, beat, beatlabel='Iso.Time'):
         # Map the beat values to their corresponding numbers
         df['beat_num'] = df[beat].map(beat_mapping)
         
+        # Get the number of beats
         beat_N = df['beat_num'].max(skipna=True)
         
+        # Add cycle numbers to the dataframe
         df = add_cycle(df, sd_column=beat, cycle_column='cycle')
         df['mean_onset'] = df[instr].mean(axis=1, skipna=True)
 
         iso_times = []
-        for k in range(1, int(df['cycle'].max(skipna=True))):
+        max_cycle = int(df['cycle'].max(skipna=True))
+        
+        # Iterate through the cycles and calculate the isochronous times
+        for k in range(1, max_cycle):
             tmp = df[df['cycle'] == k]
             tmp_next = df[df['cycle'] == k + 1]
+
+            # If the mean onset is not available, assign NaN values
             if tmp['mean_onset'].isna().iloc[0] or tmp_next['mean_onset'].isna().iloc[0]:
-                s = [np.nan] * beat_N
+                #s = [np.nan] * beat_N
+                s = [np.nan] * len(tmp)
+            # If the mean onset is available, calculate the isochronous times
             else:
                 s = np.linspace(tmp['mean_onset'].iloc[0], tmp_next['mean_onset'].iloc[0], beat_N + 1)[:-1]
             iso_times.extend(s)
 
         # Handle the last incomplete cycle if present
-        last_cycle = df[df['cycle'] == df['cycle'].max(skipna=True)]
+        last_cycle = df[df['cycle'] == max_cycle]
         if not last_cycle.empty:
-            iso_times.extend([np.nan] * len(last_cycle))
+            # copy mean.onset to iso_times
+            iso_times.extend(last_cycle['mean_onset'])
 
         df[beatlabel] = iso_times[:len(df)]
         df.drop(columns=['cycle', 'mean_onset', 'beat_num'], inplace=True)
