@@ -144,10 +144,10 @@ def detrend_anchor(meter_df, time_column, instr_df, tolerance=(0.5,0.5), num_div
 
 # ONSET ASSIGNMENT
 
-def assign_onsets_to_cycles(onsets_df, meter_column, tolerance, num_div):
+def assign_onsets_to_cycles(onsets_df, cycle_time, tolerance, num_div):
     
     # Create interpolated points
-    cycle_starts = meter_column.to_numpy()
+    cycle_starts = cycle_time.to_numpy()
 
     interp_time = [np.linspace(cycle_starts[i], cycle_starts[i + 1], num_div+1)[:-1] for i in range(len(cycle_starts) - 1)]
     interp_time = np.concatenate(interp_time)
