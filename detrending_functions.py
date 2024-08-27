@@ -1,3 +1,44 @@
+"""
+Detrending
+===========
+
+Detrending cycle starts to align with the onsets of one or more instruments
+-------------------------------
+
+Input
+-----
+.. autosummary::
+    :toctree: generated/
+
+    load_df_csv
+
+Utility functions
+-----------------
+.. autosummary::
+    :toctree: generated/
+    
+    add_window
+    find_closest_onset_in_df
+    find_onsets_in_window
+
+Detrending
+----------
+.. autosummary::
+    :toctree: generated/
+        
+    detrend_anchor
+    assign_onsets_to_cycles
+    normalize_onsets_df
+
+Plotting
+--------
+.. autosummary::
+    :toctree: generated/
+
+    plot_cycle_onsets
+    
+"""
+
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import cm
@@ -5,11 +46,117 @@ import scipy.stats as sp
 import pandas as pd
 
 
+__all__ = ['load_df_csv', 'add_window', 'find_closest_onset_in_df', 'find_onsets_in_window', 'detrend_anchor', 'assign_onsets_to_cycles', 'normalize_onsets_df', 'plot_cycle_onsets']
+
+
+# INPUT
+
+def load_df_csv(file_path, delimiter=',', sel_col=None, concat_axis=0, ignore_index=False, header='infer'):
+    """
+    Load dataframe from text (csv or txt) files.
+
+    Parameters
+    ----------
+    file_path : str or list of strings
+        names (including paths) of the input files.
+    delimiter : str
+        string used as delimiter in the input files. Default is ','.
+    sel_col : list of int or list of str
+        select the columns of the input files by numbers or names. Default is all columns.
+    concat_axis : int
+        axis to concatenate along. 0 to concatenate vertically (default), 1 to concatenate horizontally.
+    ignore_index : bool
+        if False, continue the index values on the concatenation axis. If True, reset the index. Default is False. 
+    header : int, 'infer' or 'None'
+        row number to use as the column names. Default is 'infer'. 'None' means no header.
+
+    Returns
+    -------
+    df : DataFrame
+        Concatenated DataFrame with the selected columns from the input file(s).
+
+    Notes
+    -----
+    To do: 
+    Incorporate code to input sel_col as [:5], [2:10] etc. to select columns by slicing.
+    """
+    
+    # Ensure file_path is a list
+    if isinstance(file_path, str):
+        file_path = [file_path]
+    
+    # Initialize an empty list to store dataframes
+    dataframes = []
+
+    for file in file_path:
+        # Check for valid file types
+        if not (file.endswith('.csv') or file.endswith('.txt')):
+            raise ValueError(f"Unsupported file type: {file}. Only .csv and .txt files are supported.")
+        
+        try:
+            # Load the file into a DataFrame
+            df = pd.read_csv(file, delimiter=delimiter, header=header)
+            
+            # Select specified columns if sel_col is provided
+            if sel_col is not None:
+                df = df[sel_col]
+            
+            # Append the DataFrame to the list
+            dataframes.append(df)
+        
+        except Exception as e:
+            raise RuntimeError(f"Error reading {file}: {e}. Check if the file exists and is correctly formatted.")
+    
+    # Concatenate all DataFrames in the list
+    try:
+        concatenated_df = pd.concat(dataframes, axis=concat_axis, ignore_index=ignore_index)
+    except Exception as e:
+        raise RuntimeError(f"Error concatenating dataframes: {e}")
+
+    return concatenated_df
+
+
 # UITILITY FUNCTIONS
 
-def add_window(df, cycle_column, tolerance, num_div):
+def add_window(df, cycle_column, tolerance=(0.5,0.5), num_div=16):
     
+    """
+    Adds 'ini_time' and 'end_time' columns to the DataFrame `df` by constructing window around
+    the cycle column based on tolerance values and number of subdivisions in a cycle. Used 
+    to select candidate onsets for detrending and assignment of onsets to subdivisions.
+
+    Parameters
+    ----------
+    - df : DataFrame 
+        dataFrame containing the cycle start times.
+    - cycle_column: str
+        name of the column in df containing cycle start times.
+    - tolerance: tuple
+        tuple containing the left and right tolerance values that define the shape of
+        the window around cycle start time. Default is (0.5, 0.5).
+    - num_div: Number of subdivisions in the cycle.
+
+    Returns: 
+    -------
+    - df : DataFrame
+        original DataFrame with 'ini_time' and 'end_time' columns added.
+
+    Notes
+    -----
+    - The tuple `tolerance` is interpreted as follows:
+        - tolerance[0] is the left tolerance value
+        - tolerance[1] is the right tolerance value
+    - The recommended values for tolerance are between 0 and 1. For consistency, the sum of 
+        the two values should be 1 but this is left to the discretion of the user.
+    - The window is constructed as follows:
+        ini_time = cycle_column - (subivision duration L * tolerance[0])
+        end_time = cycle_column + (subdivision duration R * tolerance[1])
+    - For example (0.5, 0.5) implies that the window should cover half the duration of a subdivision 
+        on either side of the cycle start time.
+    """
+
     df = df.copy()
+    
     # Window of tolerance for left and right of the cycle annotation
     toleranceL = (1/num_div) * tolerance[0]
     toleranceR = (1/num_div) * tolerance[1]
@@ -35,6 +182,18 @@ def find_closest_onset_in_df(time, df):
     """
     Finds the closest value to `time` in the entire DataFrame `df`.
     Ignores NaN values.
+
+    Parameters
+    ----------
+    - time : float
+        The time value to search for.
+    - df : DataFrame
+        The DataFrame to search in.
+
+    Returns
+    -------
+    - closest_value : float
+        The closest value to `time` in `df`.
     """
     values = df.values.flatten()  # Flatten the DataFrame to a 1D array
     values = values[~np.isnan(values)]  # Remove NaN values
@@ -42,7 +201,26 @@ def find_closest_onset_in_df(time, df):
     return closest_value
 
 
-def find_onsets_in_window(ini_time, end_time, df):
+def find_onsets_in_window(df, ini_time, end_time):
+    """
+    Finds valid onsets in the DataFrame `df` that fall within the window defined by `ini_time` and `end_time`.
+
+    Parameters
+    ----------
+    - df : DataFrame
+        The DataFrame containing the onset times.
+    - ini_time : float
+        The start time of the window.
+    - end_time : float
+        The end time of the window.
+
+    Returns
+    -------
+    - valid_onsets_list : list
+        A list of arrays containing the valid onsets for each column in `df`. 
+        If no valid onsets are found in a column, an empty array is returned for that column.
+
+    """
     valid_onsets_list = []
     
     for column in df.columns:
@@ -59,34 +237,52 @@ def find_onsets_in_window(ini_time, end_time, df):
 # DETRENDING
 
 # Main function to add Anchor.Time columns to meter_df based on mode
-def detrend_anchor(meter_df, time_column, instr_df, tolerance=(0.5,0.5), num_div=16, mode=1):
+
+def detrend_anchor(meter_df, time_column, instr_df, tolerance=(0.5,0.5), num_div=16, mode='closest.instr', col_name='Anchor.Time'):
     """
     Adds level 2 m.cycle times to `meter_df` based on Intermediate "instrument anchor" method.
     
     Parameters:
-    - meter_df: DataFrame containing the 'Keyboard.Time' column.
-    - instr_df: DataFrame containing the onset times of instruments. The order of columns assumes order of preference.
-    - tolerance: Parameter for defining the shape of the window (used in mode=2).
-    - num_div: Parameter for dividing the window (used in mode=2).
-    - mode: Determines which method to use.
-      - mode=1: Uses `Closest Instrument.
-      - mode=2: Uses `defined.instr.rules`.
+    -----------
+    - meter_df: DataFrame
+        DataFrame containing the cycle start times.
+    - time_column: str
+        name of the column in meter_df containing cycle start times.
+    - instr_df: DataFrame
+        DataFrame containing the onset times of instruments. The order of columns assumes order of preference.
+    - tolerance: tuple
+        parameter for defining the shape of the window (used when mode='defined.instr').
+    - num_div: int
+        Number of subdivisions in a cycle (used when mode='defined.instr').
+    - mode: str
+        Determines which method to use.
+      - mode = 'closest.instr': Uses `Closest Instrument.
+      - mode = 'defined.instr': Uses `defined.instr.rules`.
+    - col_name: str
+        Name of the new column to be added to meter_df. Default is 'Anchor.Time'.
     
     Returns:
-    - meter_df with the new 'Anchor.Time' column added.
+    - meter_df: DataFrame
+        original meter_df with the new 'Anchor.Time' column added.
+
+    Notes:
+    ------
+    - In mode='defined.instr', we could use find_closest from Carat utils post integration
+
     """
     
     meter_df = meter_df.copy()
     
-    if mode == 1:
+    if mode == 'closest.instr':
+        
         # Add Anchor.Time based on the closest onset among all instruments
-        meter_df['Anchor.Time.1'] = meter_df[time_column].apply(lambda time: find_closest_onset_in_df(time, instr_df))
+        meter_df[col_name] = meter_df[time_column].apply(lambda time: find_closest_onset_in_df(time, instr_df))
         
         # Operations to handle duplicate values
         time_column = np.array(meter_df[time_column])
-        anchor_time = np.array(meter_df['Anchor.Time.1'])
+        anchor_time = np.array(meter_df[col_name])
 
-        # Identify indices of duplicate values in 'Anchor.Time.1'
+        # Identify indices of duplicate values in 'Anchor.Time'
         unique, counts = np.unique(anchor_time, return_counts=True)
         duplicate_values = unique[counts > 1]
 
@@ -107,21 +303,24 @@ def detrend_anchor(meter_df, time_column, instr_df, tolerance=(0.5,0.5), num_div
         anchor_time[mask] = time_column[mask]
 
         # Update the DataFrame
-        meter_df['Anchor.Time.1'] = anchor_time
+        meter_df[col_name] = anchor_time
         
-    elif mode == 2:
+    elif mode == 'defined.instr':
         
+        # Add window columns to meter_df
         meter_df = add_window(meter_df, time_column, tolerance, num_div)
 
+        # Iterate over rows of meter_df
         for index, row in meter_df.iterrows():
             time = row[time_column]
             ini_time = row['ini_time']
             end_time = row['end_time']
 
             # Find the closest onset within the window
-            valid_onsets = find_onsets_in_window(ini_time, end_time, instr_df)
+            valid_onsets = find_onsets_in_window(df=instr_df, ini_time=ini_time, end_time=end_time)
 
-            closest_onset = time  # Default to original time if no valid onsets are found
+            # Default to original time if no valid onsets are found
+            closest_onset = time  
             
             # Iterate over all valid onsets collected from different columns
             for onset_array in valid_onsets:
@@ -132,36 +331,70 @@ def detrend_anchor(meter_df, time_column, instr_df, tolerance=(0.5,0.5), num_div
                     closest_onset = onset_array[np.argmin(differences)]
                     break  # Exit after finding the closest onset in the first non-empty array
 
-            meter_df.at[index, 'Anchor.Time.2'] = closest_onset
+            meter_df.at[index, col_name] = closest_onset
         
         # Drop the window columns after the operation
         meter_df.drop(columns=['ini_time', 'end_time'], inplace=True)
         
     else:
-        raise ValueError("Invalid mode! Use mode=1 or mode=2")
+        raise ValueError("Invalid mode! Use mode='closest.instr' or mode='defined.instr'")
 
     return meter_df
 
-# ONSET ASSIGNMENT
 
-def assign_onsets_to_cycles(onsets_df, cycle_time, tolerance, num_div):
+def assign_onsets_to_cycles(onsets_df, cycle_time, tolerance=(0.5,0.5), num_div=16):
     
-    # Create interpolated points
-    cycle_starts = cycle_time.to_numpy()
+    """
+    Assigns onsets to subdivisions in the cycle based on the closest onset within a window
+    and constructs a new dataframe that follows the structure of IEMP selected_onsets df.
+    Useful for further synchrony analysis and visualization of onsets.
 
-    interp_time = [np.linspace(cycle_starts[i], cycle_starts[i + 1], num_div+1)[:-1] for i in range(len(cycle_starts) - 1)]
-    interp_time = np.concatenate(interp_time)
-    interp_time = np.append(interp_time, cycle_starts[-1])   
+    Parameters
+    ----------
+    - onsets_df : DataFrame
+        DataFrame with instrument columns containing their respective onset times.
+    - cycle_time : DataFrame column (Pandas Series) or numpy array
+        Column or array containing cycle start times.
+    - tolerance : tuple
+        Parameter for defining the shape of the window. Default is (0.5, 0.5).
+    - num_div : int
+        Number of subdivisions in a cycle. Default is 16.
+
+    Returns
+    -------
+    - new_df : DataFrame
+        DataFrame containing the columns in the format followed by IEMP: 
+        cycle numbers, cycle start times, subdivision numbers, isochronous subdivision 
+        times and instrument columns with onsets assigned to subdivisions.
+
+    Notes
+    -----
+    - The onset assignment loop needs to be optimised for speed.
+    - find_closest from Carat utils can also be used after integration
+    """
+    
+    #  Check if cycle_time is a DataFrame column or a numpy array
+    if isinstance(cycle_time, pd.Series):
+        cycle_starts = cycle_time.to_numpy()
+
+    # Create isochronous grid of time points between cycle starts
+    iso_time = [np.linspace(cycle_starts[i], cycle_starts[i + 1], num_div+1)[:-1] for i in range(len(cycle_starts) - 1)]
+    iso_time = np.concatenate(iso_time)
+    iso_time = np.append(iso_time, cycle_starts[-1])   # Add the last cycle start time
 
     # Create cycle numbers
     cycle_numbers = np.repeat(np.arange(1, len(cycle_starts)), num_div)
-    cycle_numbers = np.append(cycle_numbers, len(cycle_starts))
+    cycle_numbers = np.append(cycle_numbers, len(cycle_starts)) # Add the last cycle number
+
+    # Create subdivision numbers
+    sub_div = np.tile(np.arange(1, num_div+1), len(cycle_starts) - 1)
+    sub_div = np.append(sub_div, 1) # Assign subdivision 1 to the last cycle start time
 
     # Create a dataframe
     new_df = pd.DataFrame({
                             'Cycle': cycle_numbers,
-                            'SD': np.append(np.tile(np.arange(1, num_div+1), len(cycle_starts) - 1), 1),
-                            'Iso.Time': interp_time       
+                            'SD': sub_div,
+                            'Iso.Time': iso_time       
                          })
     
     # Insert original cycle times at subdivision 1 positions
@@ -171,10 +404,13 @@ def assign_onsets_to_cycles(onsets_df, cycle_time, tolerance, num_div):
     # Re-arrange columns
     new_df = new_df[['Cycle','CycleTime','SD','Iso.Time']]
 
-    # Add window columns
+    # ASSIGNING ONSETS TO CYCLES
+
+    # Add windows around every subdivision
     new_df = add_window(new_df, cycle_column='Iso.Time', tolerance=tolerance, num_div=1)
 
-    # Iterate over columns of instrument_df
+    '''
+    # Add columns for each instrument in onsets_df
     for column in onsets_df.columns:
         new_df[column] = np.nan
 
@@ -186,8 +422,8 @@ def assign_onsets_to_cycles(onsets_df, cycle_time, tolerance, num_div):
             end_time = row['end_time']
 
             # Find the closest onset within the window
-            valid_onsets = find_onsets_in_window(ini_time, end_time, onsets_df[[column]])
-            onset_array = valid_onsets[0]
+            valid_onsets = find_onsets_in_window(df=onsets_df[[column]], ini_time=ini_time, end_time=end_time)
+            onset_array = valid_onsets[0] # Extract the array from the list
 
             closest_onset = np.nan  # Default to nan if no valid onsets are found
             
@@ -198,18 +434,68 @@ def assign_onsets_to_cycles(onsets_df, cycle_time, tolerance, num_div):
                 closest_onset = onset_array[np.argmin(differences)]
 
             new_df.at[index, column] = closest_onset
-            
+    '''
+
+    # Add columns for each instrument in onsets_df
+    for column in onsets_df.columns:
+        new_df[column] = np.nan
+
+    # Iterate through each row in new_df
+    for index, row in new_df.iterrows():
+
+        time = row['Iso.Time']
+        ini_time = row['ini_time']
+        end_time = row['end_time']
+
+        # Find the valid onsets within the window for each instrument
+        valid_onsets_list = find_onsets_in_window(df=onsets_df, ini_time=ini_time, end_time=end_time)
+
+        # Iterate through each instrument in onsets_df
+        for inst, valid_onset_array in zip(onsets_df.columns, valid_onsets_list):
+
+            closest_onset = np.nan  # Default to nan if no valid onsets are found
+
+            if valid_onset_array.size > 0:
+                # Compute the absolute differences between 'time' and each valid onset
+                differences = np.abs(valid_onset_array - time)
+                # Find the onset with the minimum difference
+                closest_onset = valid_onset_array[np.argmin(differences)]
+
+            # Assign the closest onset to the corresponding column in new_df
+            new_df.at[index, inst] = closest_onset
+
     # Drop the window columns after the operation
     new_df.drop(columns=['ini_time', 'end_time'], inplace=True)
     
     return new_df
 
 
-# NORMALISE ONSETS
-
 def normalize_onsets_df(df, inst):
+    """
+    Normalize each instrument onset time in the DataFrame `df` to the cycle duration.
+    The normalization is done by dividing the onset time by the cycle duration.
+
+    Parameters
+    ----------
+    - df : DataFrame
+        DataFrame containing the instrument onset times.
+    - inst : list
+        List of instrument columns to normalize.
+
+    Returns
+    -------
+    - df_normalized : DataFrame
+        Original DataFrame with added 'instr_norm' columns containing normalized onset times for 
+        each instrument.
+
+    Notes
+    -----
+    - This function currently expects the DataFrame to have columns 'Cycle', 'Iso.Time' and instrument 
+        columns as generated by the assign_onsets_to_cycles() function.
+        
+    """
     # Create a new DataFrame to store normalized onsets
-    df_normalized = df[['Cycle', 'CycleTime', 'SD', 'Iso.Time']].copy()
+    df_normalized = df.copy()
 
     # Get the unique cycles
     unique_cycles = df['Cycle'].unique()
@@ -234,15 +520,22 @@ def normalize_onsets_df(df, inst):
             # Divide by the cycle duration to normalize
             normalized_values = (cycle_values - cycle_start_time) / cycle_duration
 
-            # Assign the normalized values back to the appropriate location in the new DataFrame
-            df_normalized.loc[df['Cycle'] == cycle, col] = normalized_values
+            # Create a new column name with '_norm' suffix
+            norm_col_name = f"{col}_norm"
+            
+            # Assign the normalized values to the new column in the DataFrame
+            df_normalized.loc[df['Cycle'] == cycle, norm_col_name] = normalized_values
     
-    # Set the instrument columns to NaN for the last cycle
-    df_normalized.loc[df['Cycle'] == unique_cycles[-1], inst] = np.nan
+    # Set the instrument columns with '_norm' suffix to NaN for the last cycle
+    for col in inst:
+        norm_col_name = f"{col}_norm"
+        df_normalized.loc[df['Cycle'] == unique_cycles[-1], norm_col_name] = np.nan
+
     # Ensure that there are no infinite values in the DataFrame
     df_normalized.replace([np.inf, -np.inf], np.nan, inplace=True)
     
     return df_normalized
+
 
 # PLOT ONSETS
 
@@ -253,7 +546,7 @@ def plot_cycle_onsets(norm_df=None, instr=None, mean_std=True, hist_ons=False, *
     Parameters
     ----------
     norm_df : pd.DataFrame
-        DataFrame containing normalized onsets with columns 'Cycle', 'SD', 'Iso.Time', 'D1', 'J1', 'J2'.
+        DataFrame containing normalized instrument onsets with columns 'Cycle', 'SD', 'Iso.Time'.
     mean_std : bool
         If `True`, then mean and std are plotted for each subdivision.
     hist_ons : bool
