@@ -369,7 +369,6 @@ def assign_onsets_to_cycles(onsets_df, cycle_time, tolerance=(0.5,0.5), num_div=
 
     Notes
     -----
-    - The onset assignment loop needs to be optimised for speed.
     - find_closest from Carat utils can also be used after integration
     """
     
@@ -409,33 +408,6 @@ def assign_onsets_to_cycles(onsets_df, cycle_time, tolerance=(0.5,0.5), num_div=
     # Add windows around every subdivision
     new_df = add_window(new_df, cycle_column='Iso.Time', tolerance=tolerance, num_div=1)
 
-    '''
-    # Add columns for each instrument in onsets_df
-    for column in onsets_df.columns:
-        new_df[column] = np.nan
-
-        # Find the closest onset within the window
-        for index, row in new_df.iterrows():
-            
-            time = row['Iso.Time']
-            ini_time = row['ini_time']
-            end_time = row['end_time']
-
-            # Find the closest onset within the window
-            valid_onsets = find_onsets_in_window(df=onsets_df[[column]], ini_time=ini_time, end_time=end_time)
-            onset_array = valid_onsets[0] # Extract the array from the list
-
-            closest_onset = np.nan  # Default to nan if no valid onsets are found
-            
-            if onset_array.size > 0:
-                # Compute the absolute differences between 'time' and each valid onset
-                differences = np.abs(onset_array - time)
-                # Find the onset with the minimum difference
-                closest_onset = onset_array[np.argmin(differences)]
-
-            new_df.at[index, column] = closest_onset
-    '''
-
     # Add columns for each instrument in onsets_df
     for column in onsets_df.columns:
         new_df[column] = np.nan
@@ -470,7 +442,7 @@ def assign_onsets_to_cycles(onsets_df, cycle_time, tolerance=(0.5,0.5), num_div=
     return new_df
 
 
-def normalize_onsets_df(df, inst):
+def normalize_onsets_df(df, instr):
     """
     Normalize each instrument onset time in the DataFrame `df` to the cycle duration.
     The normalization is done by dividing the onset time by the cycle duration.
@@ -479,7 +451,7 @@ def normalize_onsets_df(df, inst):
     ----------
     - df : DataFrame
         DataFrame containing the instrument onset times.
-    - inst : list
+    - inst : str or list of str
         List of instrument columns to normalize.
 
     Returns
@@ -497,6 +469,9 @@ def normalize_onsets_df(df, inst):
     # Create a new DataFrame to store normalized onsets
     df_normalized = df.copy()
 
+    if isinstance(instr, str):
+        instr = [instr]
+
     # Get the unique cycles
     unique_cycles = df['Cycle'].unique()
     
@@ -513,7 +488,7 @@ def normalize_onsets_df(df, inst):
         cycle_duration = next_cycle_start_time - cycle_start_time
         
         # Normalize each instrument column in instr
-        for col in inst:
+        for col in instr:
             # Filter the rows belonging to the current cycle for the specific column
             cycle_values = df.loc[df['Cycle'] == cycle, col]
 
@@ -527,7 +502,7 @@ def normalize_onsets_df(df, inst):
             df_normalized.loc[df['Cycle'] == cycle, norm_col_name] = normalized_values
     
     # Set the instrument columns with '_norm' suffix to NaN for the last cycle
-    for col in inst:
+    for col in instr:
         norm_col_name = f"{col}_norm"
         df_normalized.loc[df['Cycle'] == unique_cycles[-1], norm_col_name] = np.nan
 
@@ -539,29 +514,41 @@ def normalize_onsets_df(df, inst):
 
 # PLOT ONSETS
 
-def plot_cycle_onsets(norm_df=None, instr=None, mean_std=True, hist_ons=False, **kwargs):
+def plot_cycle_onsets(df=None, instr=None, mean_std=True, hist_ons=False, **kwargs):
     '''
     Plot normalized onsets from the dataframe in subplots, one for each instrument.
 
     Parameters
     ----------
-    norm_df : pd.DataFrame
-        DataFrame containing normalized instrument onsets with columns 'Cycle', 'SD', 'Iso.Time'.
+    df : pd.DataFrame
+        DataFrame containing instrument onsets and columns 'Cycle' and 'SD'.
+    instr : str or list of str
+        List of instrument names to plot.
     mean_std : bool
         If `True`, then mean and std are plotted for each subdivision.
     hist_ons : bool
         If `True`, then a histogram of all onsets is plotted.
-    n_bins : int
-        Number of bins to use for the histogram.
-    fs : int
-        Font size.
     kwargs
         Additional keyword arguments to `matplotlib`.
 
     Returns
     -------
     None
+
+    Notes
+    -----
+    - Need to find a more robust calculation to shift the plots based on different data sizes
     '''
+
+    # Check if instr is a string or a list
+    if isinstance(instr, str):
+        instr = [instr]
+
+    # Add '_norm' suffix to instrument names
+    instr_norm = [f"{inst}_norm" for inst in instr]   
+
+    # Normalize onsets
+    norm_df = normalize_onsets_df(df, instr)
 
     # Set default values for kwargs
     kwargs.setdefault('color', 'seagreen')
@@ -570,12 +557,14 @@ def plot_cycle_onsets(norm_df=None, instr=None, mean_std=True, hist_ons=False, *
     kwargs.setdefault('markersize', 2)
     colors = cm.get_cmap('Set2')
 
+    # Get number of cycles, subdivisions and plots
     cycle_nos = sorted(norm_df['Cycle'].unique())
     num_cycles = len(cycle_nos)
     div_nos = sorted(norm_df['SD'].unique())
     num_div = len(div_nos)
     num_plots = len(instr)
-           
+
+    # Set shift value for bottom margin based on the plot type       
     if hist_ons:
         shift_value = num_cycles * 0.4
     elif mean_std:
@@ -589,43 +578,54 @@ def plot_cycle_onsets(norm_df=None, instr=None, mean_std=True, hist_ons=False, *
     # Create a figure with a subplot for each instrument
     fig, axes = plt.subplots(num_plots, 1, figsize=(10, total_height), sharex=True)
 
+    # Ensure axes is a list
     if num_plots == 1:
         axes = [axes]
 
-    for idx, instrument in enumerate(instr):
+    # Plot onsets for each instrument using their normalized values
+    for idx, instrument in enumerate(instr_norm):
+        # Get the current axis
         ax = axes[idx]
-        color = colors(idx*2) # Get the color for the current instrument
+        
+        # Set the color for the current instrument
+        color = colors(idx*2) # Get a color from the colormap
         kwargs['color'] = color
 
+        # Plot onsets for each cycle
         for cycle in cycle_nos:
             cycle_df = norm_df[norm_df['Cycle'] == cycle]
             onsets = cycle_df[instrument].values
             onsets = onsets[~np.isnan(onsets)]
             
+            # Plot the onsets for the current cycle
             ax.plot(onsets, (cycle * np.ones(len(onsets))) + shift_value,
                     linestyle='None', **kwargs)
     
+        # Set the plot properties
         ax.grid(False)
+        ax.tick_params(length=10, width=1)
 
-        # x-ticks at every subdivision
+        # Set the x-axis ticks and labels
         x_ticks = np.linspace(0, 1, num_div+1)
         x_labels = [num+1 for num in range(num_div)]
         ax.set_xticks(x_ticks[:-1])
         ax.set_xticklabels(x_labels, fontsize=14)
-        ax.set_yticks([])
-        ax.tick_params(length=10, width=1)
         ax.set_xlim(-0.10, 1)
-        ax.set_ylim(0, (num_cycles*1.1) + shift_value)
 
+        # Set the y-axis ticks and labels
+        ax.set_yticks([])
+        ax.set_ylim(0, (num_cycles*1.1) + shift_value)
+        ax.set_ylabel(r'Cycles $\longrightarrow$', fontsize=14)
+           
+        # Remove spines
         ax.spines['right'].set_visible(False)
         ax.spines['left'].set_visible(False)
-        ax.set_ylabel(r'Cycles $\longrightarrow$', fontsize=14)
-
+        
         # Add instrument name to the top right of the plot
-        ax.text(1, num_cycles, instrument, fontsize=14, color='black', ha='right', va='top')
+        ax.text(1, num_cycles, instr[idx], fontsize=14, color='black', ha='right', va='top')
         
         if hist_ons:
-        # Flatten onsets for histogram
+            # Flatten onsets for histogram
             onsets_flattened = norm_df[instrument].values.flatten()
             onsets_flattened = onsets_flattened[~np.isnan(onsets_flattened)]
             ax.hist(onsets_flattened, bins=100, density=False, alpha=0.2, facecolor='black')
@@ -635,10 +635,17 @@ def plot_cycle_onsets(norm_df=None, instr=None, mean_std=True, hist_ons=False, *
             for sd in div_nos:
                 sd_onsets = norm_df[norm_df['SD'] == sd][instrument].values.flatten()
                 sd_onsets = sd_onsets[~np.isnan(sd_onsets)]
+                
                 if len(sd_onsets) > 0:
+                    # Fit a normal distribution to the data
                     mu, std = sp.norm.fit(sd_onsets)
-                    ax.errorbar(mu, shift_value * 0.9, xerr=std, fmt='.', capsize=1, color='royalblue')
-                    ax.axvline(x=mu, ymin=(shift_value * 0.9)/((num_cycles*1.1) + shift_value), ymax= 1, linestyle='--', color='royalblue', linewidth=0.7)
+                    
+                    # Plot the mean and std dev for the current SD value
+                    ax.errorbar(mu, shift_value * 0.9, xerr=std, 
+                                fmt='.', capsize=1, color='royalblue')
+                    ax.axvline(x=mu, 
+                               ymin=(shift_value * 0.9)/((num_cycles*1.1) + shift_value), 
+                               ymax= 1, linestyle='--', color='royalblue', linewidth=0.7)
                     ax.text(mu, shift_value/2, "{:3.0f}".format(mu * 100 * num_div/4) + "%",
                             color='royalblue', horizontalalignment='center',
                             verticalalignment='bottom', fontsize=10)
