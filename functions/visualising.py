@@ -105,3 +105,172 @@ def plot_by_beat(df=None, instr=None, beat=None, virtual=None, pcols=2, griddevi
 
     plt.tight_layout(rect=[0.05, 0.05, 1, 0.95])
     plt.show()
+
+
+def boxplot_by_beat(df=None, instr=None, beat=None, virtual=None, pcols=2, color='lightblue'):
+    DF = pd.DataFrame()
+    S = pd.DataFrame()
+    
+    # Loop across instruments
+    for k in range(len(instr)):
+        tmp = df[[instr[k], beat, virtual]].copy()
+        tmp.columns = ['instr', 'beat', 'virtual']
+        IBI = tmp['virtual'].diff().median()
+        tmp['VSD'] = tmp['instr'] - tmp['virtual']
+        tmp['VSDR'] = tmp['VSD'] / (tmp['virtual'] - tmp['virtual'].shift(1, fill_value=IBI))
+        tmp['name'] = instr[k]
+        DF = pd.concat([DF, tmp])
+        tmp['beatF'] = tmp['beat'].astype('category')
+
+        s = tmp.groupby('beatF').agg(M=('VSDR', lambda x: x.mean() * 100)).reset_index()
+        s['Time'] = tmp['instr'].min()
+        s['name'] = instr[k]
+        S = pd.concat([S, s])
+
+    DF['name'] = DF['name'].astype('category')
+    S['name'] = S['name'].astype('category')
+
+    unique_beats = sorted(DF['beat'].unique())
+    # Create a mapping from beat values to numbers
+    beat_mapping = {beat: i + 1 for i, beat in enumerate(unique_beats)}
+    # Assign the corresponding number to each beat value
+    DF['beat_number'] = DF['beat'].map(beat_mapping)
+    S['beat_number'] = S['beatF'].map(beat_mapping)
+
+    # Plot
+    num_plots = len(instr)
+    num_rows = num_plots // pcols + (num_plots % pcols > 0)
+    fig, axes = plt.subplots(nrows=num_rows, ncols=pcols, figsize=(10, 3*num_rows), squeeze=True, sharex=True, sharey=True)
+    
+    # Check if axes is a single AxesSubplot or an array of them
+    if num_plots == 1:
+        axes = [axes]  # Convert single AxesSubplot to a list
+    else:
+        axes = axes.flatten()  # Flatten the array of AxesSubplot
+
+    for ax, instrument in zip(axes, instr):
+        
+        data = DF[DF['name'] == instrument]
+        sns.boxplot(data=data, x='beat_number', y=DF['VSD'] * 1000, ax=ax, color=color, width=0.5, fliersize=2)
+
+        ax.set_title(f'{instrument}', fontsize=14)
+        ax.grid(True, linestyle='-', linewidth=0.5)
+        ax.set_ylabel('')
+        ax.set_xlabel('')
+        ax.tick_params(axis='x', labelsize=12)
+
+    # Remove unused subplots if any
+    for i in range(len(instr), len(axes)):
+        fig.delaxes(axes[i])
+
+    # Common labels    
+    fig.text(0.5, 0.0, f'Beat ({beat})', ha='center' , va='center', fontsize=14)
+    fig.text(0.0, 0.5, 'Asynchrony (ms)', ha='center', va='center', rotation='vertical', fontsize=14)
+    
+    plt.tight_layout()
+    plt.show()
+
+
+def plot_by_pair(df=None, bybeat=False, reference=0, colourpalette='Pastel2'):
+    # Ensure required columns exist in the dataframe
+    if 'asynch' not in df or ('beatL' not in df and bybeat):
+        raise ValueError("Dataframe must contain 'asynch' column and 'beatL' column if bybeat=True")
+    
+    # Convert asynch to long format
+    m = pd.melt(df['asynch'], var_name='Instrument', value_name='ms')
+    m['ms'] = m['ms'] * 1000  # Convert to milliseconds
+    m['Instrument'] = m['Instrument'].astype('category')
+    
+    if not bybeat:  # Asynchronies
+        
+        fig, ax = plt.subplots(figsize=(10, 8))
+        
+        # Horizontal violin plot without grey edge line
+        sns.violinplot(
+            data=m,
+            y='Instrument',
+            x='ms',
+            hue=None,
+            ax=ax,
+            scale='width',
+            palette=colourpalette,
+            alpha=0.5,
+            orient='h',
+            linewidth=1,  # Violin plot edge line width
+            linecolor='black',  
+            inner=None  # Removes iterquantile range bar, {“box”, “quart”, “point”, “stick”, None}
+        )
+        
+        # Jitter plot
+        sns.stripplot(
+            data=m,
+            y='Instrument',
+            x='ms',
+            color='grey',
+            size=2,
+            ax=ax,
+            jitter=0.15,
+            alpha=1,
+            zorder=2
+        )
+
+        # Mean summary line
+        means = m.groupby('Instrument')['ms'].mean()
+        for i, mean in enumerate(means):
+            ax.plot([mean, mean], [i - 0.2, i + 0.2], color='black', linewidth=2, zorder=3)
+
+        # Reference line
+        ax.axvline(reference, color='orange', linestyle='dashed')
+        
+        # Grid lines
+        ax.set_axisbelow(False)
+        ax.grid(visible=True, which='both', axis='both', linestyle='-', linewidth=0.2, alpha=0.7, color = 'black')
+
+        # Set labels
+        ax.set_ylabel('Instrument pairs', fontsize=14)
+        ax.set_xlabel('Synchrony (ms)', fontsize=14)
+        #ax.set_title('Synchrony by Instrument Pair')
+
+        plt.show()
+
+    if bybeat:  # Synchronies by beat
+        b = pd.melt(df['beatL'], var_name='variable', value_name='value')
+        m['beatL'] = b['value'].astype('category')
+        
+        # Ensure color palette has enough colors for beat levels
+        colpal = sns.color_palette(colourpalette, len(m['beatL'].unique()))
+    
+        fig, ax = plt.subplots(figsize=(10, 6))
+        
+        # Boxplot with unique colors per beat level
+        sns.boxplot(
+            data=m,
+            x='Instrument',
+            y='ms',
+            hue='beatL',
+            ax=ax,
+            palette=colpal,
+            showfliers=False,
+            linewidth=0.5,
+            dodge=True
+        )
+        
+        # Reference line
+        ax.axhline(reference, color='orange', linestyle='dashed')
+
+        # Grid lines
+        ax.grid(visible=True, which='both', axis='both', linestyle='-', linewidth=0.1, alpha=0.7, color = 'black')
+        
+        # Set labels
+        ax.set_xlabel('Instrument pairs', fontsize=14)
+        ax.set_ylabel('Synchrony (ms)', fontsize=14)
+        #ax.set_title('Synchrony by Instrument Pair and Beat')
+
+        # Move the legend box outside the plot area
+        ax.legend(title='Subdivision', loc='upper left', bbox_to_anchor=(1.02, 1), borderaxespad=0)
+
+        plt.show()
+
+    #return fig
+
+
