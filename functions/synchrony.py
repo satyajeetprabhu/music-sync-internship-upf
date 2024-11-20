@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+from itertools import combinations
 
 def sync_joint_onsets(df=None, instr1=None, instr2=None):
     """
@@ -136,4 +137,63 @@ def sync_sample_paired(df=None, instr1=None, instr2=None, n=0, bootn=None, beat=
     # Create a DataFrame from the asynchronies and beat structures
     result_df = pd.DataFrame({'asynch': D, 'beatL': beat_L})
     return result_df
+
+def sync_execute_pairs(df=None, instruments=None, n=0, bootn=None, beat=None):
+    """
+    Calculates asynchronies across all pairs of instruments
+
+    Parameters:
+    - df (pd.DataFrame): Data frame to be processed, where the minimal requirements is two or more instruments (instruments)
+    - instruments (list): List of two or more instruments (required) to pair. If None, all instruments in the data frame are used.
+    - n (int): Number of samples to be drawn from the pool of joint onsets (default 0)
+    - bootn (int): Number of bootstrap iterations (default=None)
+    - beat (str): Column name for the beat structure to be included (default=None)
+    
+    Returns:
+    - dict : A dictionary with two DataFrames containing asynchronies and beat structure: 'asynch' and 'beatL'
+    """
+    # Set default for bootn
+    if bootn is None:
+        bootn = 1
+
+    # Error check: Ensure n >= bootn when bootstrapping
+    if n < bootn and bootn > 1:
+        raise ValueError("More bootstraps (bootn) are specified than samples (n)!")
+
+    # Generate all combinations of instruments (pairs)
+    instrument_combinations = list(combinations(instruments, 2))
+    instrument_combinations = np.transpose(np.array(instrument_combinations))
+    N = instrument_combinations.shape[1]
+
+    # Create column labels for each pair
+    col_labels = [f"{pair[0]}-{pair[1]}" for pair in zip(instrument_combinations[0], instrument_combinations[1])]
+
+    DF2 = []
+    BE2 = []
+
+    # Iterate over instrument pairs
+    for i in range(N):
+        instr1 = instrument_combinations[0][i]
+        instr2 = instrument_combinations[1][i]
+
+        if n == 0:
+            n_joint = sync_joint_onsets(df, instr1, instr2)
+
+            result = sync_sample_paired(df, instr1, instr2, n_joint, bootn, beat, False)
+            DF2.append(result['asynch'].to_list())
+            BE2.append(result['beatL'].to_list())
+        else:
+            result = sync_sample_paired(df, instr1, instr2, n, bootn, beat, False)
+            DF2.append(result['asynch'].to_list())
+            BE2.append(result['beatL'].to_list())
+
+    # Pad lists with None for unequal lengths and convert to DataFrame
+    max_length_DF = max(len(x) for x in DF2)
+    max_length_BE = max(len(x) for x in BE2)
+
+    DF = pd.DataFrame({col_labels[i]: DF2[i] + [None] * (max_length_DF - len(DF2[i])) for i in range(N)})
+    BE = pd.DataFrame({col_labels[i]: BE2[i] + [None] * (max_length_BE - len(BE2[i])) for i in range(N)})
+
+    # Return as a dictionary
+    return {'asynch': DF, 'beatL': BE}
 
