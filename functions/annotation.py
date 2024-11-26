@@ -221,7 +221,7 @@ def add_isobeats(df, instr, beat, beatlabel='Iso.Time'):
     beatlabel (str): Column name for the newly created beats. Default is 'Iso.Time'.
 
     Returns:
-    pd.DataFrame: Data frame with added column of isochronous beats or mean onset times.
+    pd.DataFrame: Data frame with summaries of calculated asynchronies
     """
     
     df = df.copy()

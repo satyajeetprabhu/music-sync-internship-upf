@@ -1,6 +1,8 @@
 import numpy as np
 import pandas as pd
 from itertools import combinations
+from .annotation import add_isobeats
+from .summary import summarise_sync
 
 def sync_joint_onsets(df=None, instr1=None, instr2=None):
     """
@@ -39,7 +41,9 @@ def sync_sample_paired(df=None, instr1=None, instr2=None, n=0, bootn=None, beat=
     Returns:
         dict: A dictionary containing asynchronies and beat structures.
     """
-    
+    if beat is None:
+        print('Specify the beat column name')
+
     if isinstance(df, pd.DataFrame):
         # Convert the specified columns to NumPy arrays
         inst1 = df[instr1].to_numpy()
@@ -196,4 +200,41 @@ def sync_execute_pairs(df=None, instruments=None, n=0, bootn=None, beat=None):
 
     # Return as a dictionary
     return {'asynch': DF, 'beatL': BE}
+
+
+def sync_sample_paired_relative(df=None, instr=None, instr_ref=None, beat=None):
+    '''
+    Compare instrument onset times to mean onset times from several instruments
+
+    Parameters:
+    - df (pd.DataFrame): Data frame to be processed (required)
+    - instr (str): Instrument to be processed (required)
+    - instr_ref (list): List of reference instruments or reference timing to be processed (required)
+    - beat (str): Beat structure (subdivisions) to be included (required)
+
+    Returns:
+    - pd.DataFrame: Data frame with different asynchrony measures
+
+    '''
+    
+    # Ensure 'Isochronous.SD.Time' column is removed
+    if 'Isochronous.SD.Time' in df.columns:
+        df = df.drop(columns=['Isochronous.SD.Time'])
+    
+    # Add isobeats using the provided function
+    df = add_isobeats(df=df, instr=instr_ref, beat=beat)
+    
+    if len(instr_ref) == 1:
+        instr2 = 'Iso.Time'
+    else:
+        instr2 = 'Virtual.Time'
+
+    # Compare onset times to the new reference
+    df2 = sync_sample_paired(df, instr1=instr, instr2=instr2, beat=beat)
+    
+    # Summarize the synchronization metrics
+    output = summarise_sync(df2)
+    
+    return output
+
 
